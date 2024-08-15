@@ -156,7 +156,7 @@ export default function Recherche() {
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="mySelect mb-4 p-2 border rounded"
+          className="mySelect mb-4 p-2 border rounded text-black"
           placeholder="Rechercher une carte par nom"
         />
         <button
