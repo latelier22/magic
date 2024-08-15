@@ -1,113 +1,289 @@
+"use client";
 import Image from "next/image";
+import { useState } from "react";
+import { useSession } from "next-auth/react";
 
-export default function Home() {
+// Fonction pour tirer un nombre donné de cartes
+async function fetchRandomCards(numCards) {
+  const fetchedCards = [];
+  for (let i = 0; i < numCards; i++) {
+    const response = await fetch("https://api.scryfall.com/cards/random");
+    const cardData = await response.json();
+    fetchedCards.push(cardData);
+  }
+  return fetchedCards;
+}
+
+// Fonction pour rechercher une carte par nom
+async function searchCardByName(searchTerm) {
+  const response = await fetch(
+    `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(searchTerm)}`
+  );
+  return response.json();
+}
+
+// Fonction pour vérifier si le couple user-card existe déjà dans Strapi
+async function checkUserCardRelation(userId, cardId, token) {
+  const apiUrl = process.env.NEXT_PUBLIC_STRAPI_URL;
+  const response = await fetch(`${apiUrl}/api/user-cards?populate=*&filters[user][id][$eq]=${userId}&filters[card][id][$eq]=${cardId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  const data = await response.json();
+  console.log("verif data",data)
+  return data.data.length > 0 ? data.data[0] : null;
+}
+
+// Fonction pour ajouter une nouvelle relation user-card dans Strapi
+async function addUserCardToStrapi(userId, cardId, token) {
+  const apiUrl = process.env.NEXT_PUBLIC_STRAPI_URL;
+  const response = await fetch(`${apiUrl}/api/user-cards`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      data: {
+        user: userId,
+        card: cardId,
+        count: 1,
+      },
+    }),
+  });
+  return response.json();
+}
+
+// Fonction pour mettre à jour le count d'une relation user-card existante
+async function updateUserCardCountInStrapi(userCardId, newCount, token) {
+  const apiUrl = process.env.NEXT_PUBLIC_STRAPI_URL;
+  const response = await fetch(`${apiUrl}/api/user-cards/${userCardId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      data: {
+        count: newCount,
+      },
+    }),
+  });
+  return response.json();
+}
+
+// Fonction pour ajouter une carte avec gestion des doublons
+async function handleAddCard(session, searchedCard) {
+  if (!session || !searchedCard) return;
+
+  const token = session.jwt;
+  const userId = session.user.id;
+
+  // Vérifiez si la relation user-card existe déjà
+  const existingUserCard = await checkUserCardRelation(userId, searchedCard.id, token);
+
+  if (existingUserCard) {
+    const confirmUpdate = confirm(
+      `Vous avez déjà cette carte en ${existingUserCard.attributes.count} exemplaire(s). Voulez-vous augmenter le nombre ?`
+    );
+    if (confirmUpdate) {
+      // Augmentez le nombre de cette carte
+      await updateUserCardCountInStrapi(
+        existingUserCard.id,
+        existingUserCard.attributes.count + 1,
+        token
+      );
+      alert("Le nombre d'exemplaires a été mis à jour.");
+    }
+  } else {
+    // Créez une nouvelle relation user-card
+    await addUserCardToStrapi(userId, searchedCard.id, token);
+    alert("Carte ajoutée avec succès.");
+  }
+}
+
+// Composant pour la recherche de cartes
+function CardSearch({ onSearch, session }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchedCard, setSearchedCard] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSearch = async () => {
+    setLoading(true);
+    const cardData = await searchCardByName(searchTerm);
+    setSearchedCard(cardData);
+    setLoading(false);
+  };
+
+  const handleAddCard = async () => {
+    if (!searchedCard) return;
+    await handleAddCard(session, searchedCard);
+  };
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.js</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+    <div className="mb-8">
+      <input
+        type="text"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="mb-4 p-2 border rounded"
+        placeholder="Rechercher une carte par nom"
+      />
+      <button
+        onClick={handleSearch}
+        className="mb-4 px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+      >
+        Rechercher une carte
+      </button>
+
+      {loading && <p>Loading...</p>}
+
+      {searchedCard && (
+        <div>
+          <Image
+            src={searchedCard.image_uris?.normal}
+            alt={searchedCard.name}
+            width={300}
+            height={420}
+            className="mx-auto"
+          />
+          <p className="text-center text-lg mt-2">{searchedCard.name}</p>
+          {session && (
+            <button
+              onClick={handleAddCard}
+              className="mt-4 px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Ajouter la carte
+            </button>
+          )}
         </div>
-      </div>
+      )}
+    </div>
+  );
+}
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-full sm:before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full sm:after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
+// Composant pour l'affichage des cartes
+function CardGrid({ cards, flipped, onFlipCard }) {
+  return (
+    <div className="flex flex-wrap justify-center gap-4">
+      {cards.map((card, index) => (
+        <div
+          key={index}
+          className={`card ${flipped[index] ? "flipped" : ""}`}
+          onClick={() => onFlipCard(index)}
+          style={{
+            perspective: "1000px",
+            cursor: "pointer",
+            width: "200px",
+            height: "280px",
+          }}
         >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
+          <div
+            style={{
+              transformStyle: "preserve-3d",
+              transition: "transform 0.6s",
+              transform: flipped[index] ? "rotateY(180deg)" : "",
+              width: "100%",
+              height: "100%",
+              position: "relative",
+            }}
+          >
+            <Image
+              src="/card-back.jpg"
+              alt="Card Back"
+              width={200}
+              height={280}
+              style={{
+                backfaceVisibility: "hidden",
+                position: "absolute",
+                top: 0,
+                left: 0,
+                transform: "rotateY(180deg)",
+              }}
+            />
+            <Image
+              className="hover:scale-110"
+              src={card.image_uris?.normal}
+              alt={card.name}
+              width={200}
+              height={280}
+              style={{
+                backfaceVisibility: "hidden",
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800 hover:dark:bg-opacity-30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
+// Composant pour les contrôles (nombre de cartes et tirage)
+function CardControls({ numCards, onNumCardsChange, onDrawCards }) {
+  return (
+    <div className="mb-8 flex flex-col items-center">
+      <input
+        type="number"
+        min="1"
+        value={numCards}
+        onChange={(e) => onNumCardsChange(parseInt(e.target.value))}
+        className="mb-4 p-2 border rounded"
+        placeholder="Nombre de cartes"
+      />
+      <button
+        onClick={onDrawCards}
+        className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700"
+      >
+        RETIREZ {numCards} CARTES
+      </button>
+    </div>
+  );
+}
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
+// Composant principal Home
+export default function Home() {
+  const [cards, setCards] = useState([]);
+  const [flipped, setFlipped] = useState([]);
+  const [numCards, setNumCards] = useState(5); // Nombre de cartes à tirer
+  const [loading, setLoading] = useState(false);
+  const { data: session } = useSession();
 
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50 text-balance`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
+  const handleNumCardsChange = (value) => {
+    if (!isNaN(value) && value > 0) {
+      setNumCards(value);
+    }
+  };
+
+  const handleFlipCard = (index) => {
+    const newFlipped = [...flipped];
+    newFlipped[index] = !newFlipped[index];
+    setFlipped(newFlipped);
+  };
+
+  const handleDrawCards = async () => {
+    setLoading(true);
+    const newCards = await fetchRandomCards(numCards);
+    setCards([...cards, ...newCards]); // Ajouter les nouvelles cartes aux anciennes
+    setFlipped([...flipped, ...Array(numCards).fill(true)]); // Réinitialiser l'état de retournement pour les nouvelles cartes
+    setLoading(false);
+  };
+
+  return (
+    <main className="flex flex-col items-center justify-center min-h-screen p-24">
+      <CardSearch onSearch={searchCardByName} session={session} />
+
+      <CardControls
+        numCards={numCards}
+        onNumCardsChange={handleNumCardsChange}
+        onDrawCards={handleDrawCards}
+      />
+
+      {loading ? (
+        <div className="spinner">Loading...</div>
+      ) : (
+        <CardGrid cards={cards} flipped={flipped} onFlipCard={handleFlipCard} />
+      )}
     </main>
   );
 }
