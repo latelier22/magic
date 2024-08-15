@@ -45,7 +45,7 @@ async function MesCartesPage() {
     <main className="flex flex-col items-center justify-center min-h-screen p-6 pt-48">
       <h1 className="text-3xl font-bold mb-4">Mes Cartes</h1>
       {userCardsWithImages.length === 0 ? (
-        <p>Vous n'avez aucune carte.</p>
+        <p>Vous n&apos;avez aucune carte.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {userCardsWithImages.map((userCard) => (
