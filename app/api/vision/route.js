@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { ImageAnnotatorClient } from "@google-cloud/vision";
 import path from "path";
 import fs from "fs";
 import fetch from "node-fetch"; // Assure-toi que fetch est disponible
 
-// Configurer le répertoire d'uploads
-const UPLOAD_DIR = path.resolve(process.env.ROOT_PATH ?? "", "public/uploads");
+// Configurer le répertoire temporaire pour stocker la clé JSON
+const TMP_DIR = path.join('/tmp');
+const serviceAccountKeyPath = path.join(TMP_DIR, 'service-account-key.json');
 
 // Désactiver le bodyParser de Next.js
 export const config = {
@@ -14,8 +15,25 @@ export const config = {
   },
 };
 
-export const POST = async (req) => {
+// Recréer le fichier JSON à partir de la variable d'environnement
+function recreateServiceAccountKey() {
+  if (!process.env.GOOGLE_CLOUD_KEY_BASE64) {
+    throw new Error("La variable d'environnement GOOGLE_CLOUD_KEY_BASE64 est manquante.");
+  }
+
+  const decodedKey = Buffer.from(process.env.GOOGLE_CLOUD_KEY_BASE64, 'base64').toString('utf-8');
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR);
+  }
+  fs.writeFileSync(serviceAccountKeyPath, decodedKey);
+}
+
+export async function POST(req) {
   try {
+    // Recréer la clé JSON à partir de la variable d'environnement
+    recreateServiceAccountKey();
+
+    // Lire l'image envoyée par le frontend
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -23,30 +41,23 @@ export const POST = async (req) => {
       // Convertir le fichier en buffer
       const buffer = Buffer.from(await file.arrayBuffer());
 
-      // Sauvegarder l'image sur le disque (optionnel)
-      const filePath = path.resolve(UPLOAD_DIR, file.name);
-      if (!fs.existsSync(UPLOAD_DIR)) {
-        fs.mkdirSync(UPLOAD_DIR);
-      }
-      fs.writeFileSync(filePath, buffer);
-
       // Convertir l'image en base64 sans le préfixe
       const base64Image = buffer.toString("base64");
 
       // Initialiser le client Google Vision
       const client = new ImageAnnotatorClient({
-        keyFilename: path.join(process.cwd(), "app/service-account-key.json"),
+        keyFilename: serviceAccountKeyPath,
       });
 
       // Appeler l'API Google Vision pour analyser l'image
       const [result] = await client.textDetection({
         image: {
-          content: base64Image, // Envoie uniquement la chaîne base64 sans préfixe
+          content: base64Image,
         },
       });
 
       // Extraire les annotations de texte
-      const detections = result.textAnnotations[0].description.split("\n");
+      const detections = result.textAnnotations[0]?.description.split("\n") || [];
 
       // Organiser les informations dans un format JSON plus structuré
       const titre = detections[0] || "";
@@ -63,7 +74,7 @@ export const POST = async (req) => {
         citation: detections[7] || "",
         auteur: detections[8] || "",
         footer: detections.slice(10).join(" ") || "",
-        scryfall: scryfallData, // Inclure la réponse de Scryfall dans le résultat
+        scryfall: scryfallData,
       };
 
       return NextResponse.json(jsonResponse);
@@ -80,4 +91,4 @@ export const POST = async (req) => {
       message: "Error processing image",
     });
   }
-};
+}
