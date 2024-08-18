@@ -70,7 +70,7 @@ export default function ScanPage() {
       {/* Aperçu de l'image avant le scan */}
       {imagePreview && (
         <div className="mb-4">
-          <p className="text-gray-600 mb-2">Aperçu de l'image :</p>
+          <p className="text-gray-600 mb-2">Aperçu de l&apos;image :</p>
           <img
             src={imagePreview}
             alt="Aperçu"
