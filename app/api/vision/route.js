@@ -8,12 +8,7 @@ import fetch from "node-fetch"; // Assure-toi que fetch est disponible
 const TMP_DIR = path.join('/tmp');
 const serviceAccountKeyPath = path.join(TMP_DIR, 'service-account-key.json');
 
-// Désactiver le bodyParser de Next.js
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+
 
 // Recréer le fichier JSON à partir de la variable d'environnement
 function recreateServiceAccountKey() {
